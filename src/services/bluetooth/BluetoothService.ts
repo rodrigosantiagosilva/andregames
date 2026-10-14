@@ -1,12 +1,17 @@
+
 /// <reference types="cordova-plugin-bluetoothle" />
+
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import { parseAdvertisement } from './advertisement';
 import { FrameAssembler, encodeFrames } from './frames';
 import type { BluetoothMessage, Player } from '@/types/game';
 
-export const GAME_SERVICE_UUID = 'd1e50a00-5f6c-4f3a-8d21-2db5a1500001';
-export const GAME_CHARACTERISTIC_UUID = 'd1e50a01-5f6c-4f3a-8d21-2db5a1500001';
+export const GAME_SERVICE_UUID =
+  'd1e50a00-5f6c-4f3a-8d21-2db5a1500001';
+
+export const GAME_CHARACTERISTIC_UUID =
+  'd1e50a01-5f6c-4f3a-8d21-2db5a1500001';
 
 export interface NearbyRoom {
   address: string;
@@ -28,8 +33,17 @@ type PluginEvent = Partial<BluetoothlePlugin.InitializeResult> & {
   rssi?: number;
   localName?: string;
 };
-type MessageHandler = (message: unknown, remoteAddress: string) => void;
-type ConnectionHandler = (connected: boolean, address: string) => void;
+
+type MessageHandler = (
+  message: unknown,
+  remoteAddress: string,
+) => void;
+
+type ConnectionHandler = (
+  connected: boolean,
+  address: string,
+) => void;
+
 interface PendingNotification {
   resolve: () => void;
   reject: (reason: Error) => void;
@@ -39,49 +53,108 @@ interface PendingNotification {
 class BluetoothService {
   private role: 'host' | 'guest' | null = null;
   private remoteAddress = '';
+
   private readonly peerAddresses = new Map<string, string>();
   private readonly connectedAddresses = new Set<string>();
-  private readonly notificationWaiters = new Map<string, PendingNotification[]>();
+
+  private readonly notificationWaiters = new Map<
+    string,
+    PendingNotification[]
+  >();
+
   private readonly assembler = new FrameAssembler();
+
   private onMessage: MessageHandler = () => undefined;
   private onConnection: ConnectionHandler = () => undefined;
+
   private transferId = Math.floor(Math.random() * 0xffff);
 
   private plugin(): BluetoothlePlugin.Bluetoothle {
     if (Capacitor.getPlatform() !== 'android') {
-      throw new Error('Bluetooth multiplayer está disponível somente no Android nesta versão.');
+      throw new Error(
+        'Bluetooth multiplayer está disponível somente no Android nesta versão.',
+      );
     }
+
     if (!window.bluetoothle) {
-      throw new Error('Plugin Bluetooth nativo ausente. Sincronize e instale o projeto Android.');
+      throw new Error(
+        'Plugin Bluetooth nativo ausente. Sincronize e instale o projeto Android.',
+      );
     }
+
     return window.bluetoothle;
   }
 
-  private call<T>(operation: (resolve: (result: T) => void, reject: (error: unknown) => void) => void): Promise<T> {
-    return new Promise((resolve, reject) => operation(resolve, reject));
+  private call<T>(
+    operation: (
+      resolve: (result: T) => void,
+      reject: (error: unknown) => void,
+    ) => void,
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      operation(resolve, reject);
+    });
   }
 
   private async requestPermission(
-    check: (resolve: (result: { hasPermission: boolean }) => void) => void,
-    request: (resolve: (result: { requestPermission: boolean }) => void, reject: (error: unknown) => void) => void,
+    check: (
+      resolve: (result: { hasPermission: boolean }) => void,
+    ) => void,
+    request: (
+      resolve: (result: { requestPermission: boolean }) => void,
+      reject: (error: unknown) => void,
+    ) => void,
     permissionName: string,
   ): Promise<void> {
-    const granted = await new Promise<boolean>((resolve) => check((result) => resolve(result.hasPermission)));
+    const granted = await new Promise<boolean>((resolve) => {
+      check((result) => resolve(result.hasPermission));
+    });
+
     if (granted) return;
-    const requested = await new Promise<boolean>((resolve, reject) => request(
-      (result) => resolve(result.requestPermission),
-      (reason) => reject(new Error(`Permissão ${permissionName} negada. Ative-a nas configurações do Android.`)),
-    ));
-    if (!requested) throw new Error(`Permissão ${permissionName} negada. Ative-a nas configurações do Android.`);
+
+    const requested = await new Promise<boolean>((resolve, reject) => {
+      request(
+        (result) => resolve(result.requestPermission),
+        () =>
+          reject(
+            new Error(
+              `Permissão ${permissionName} negada. Ative-a nas configurações do Android.`,
+            ),
+          ),
+      );
+    });
+
+    if (!requested) {
+      throw new Error(
+        `Permissão ${permissionName} negada. Ative-a nas configurações do Android.`,
+      );
+    }
   }
 
-  private async ensurePermissions(action: 'scan' | 'connect' | 'advertise'): Promise<void> {
+  private async ensurePermissions(
+    action: 'scan' | 'connect' | 'advertise',
+  ): Promise<void> {
     const bluetooth = this.plugin();
     const { androidSDKVersion = 0 } = await Device.getInfo();
-    const request = (method: (success: (result: { requestPermission: boolean }) => void) => void) =>
-      (resolve: (result: { requestPermission: boolean }) => void, reject: (reason: unknown) => void) => {
-        (method as unknown as (success: typeof resolve, error: typeof reject) => void)(resolve, reject);
+
+    const request =
+      (
+        method: (
+          success: (result: { requestPermission: boolean }) => void,
+        ) => void,
+      ) =>
+      (
+        resolve: (result: { requestPermission: boolean }) => void,
+        reject: (error: unknown) => void,
+      ) => {
+        (
+          method as unknown as (
+            success: typeof resolve,
+            error: typeof reject,
+          ) => void
+        )(resolve, reject);
       };
+
     if (androidSDKVersion < 31) {
       await this.requestPermission(
         (resolve) => bluetooth.hasPermission(resolve),
@@ -89,6 +162,7 @@ class BluetoothService {
         'de localização',
       );
     }
+
     if (action === 'scan' || action === 'connect') {
       await this.requestPermission(
         (resolve) => bluetooth.hasPermissionBtScan(resolve),
@@ -96,13 +170,17 @@ class BluetoothService {
         'de busca Bluetooth',
       );
     }
+
     if (action === 'connect' || action === 'advertise') {
       await this.requestPermission(
         (resolve) => bluetooth.hasPermissionBtConnect(resolve),
         request(bluetooth.requestPermissionBtConnect.bind(bluetooth)),
-        action === 'advertise' ? 'de conexão Bluetooth para hospedar a sala' : 'de conexão Bluetooth',
+        action === 'advertise'
+          ? 'de conexão Bluetooth para hospedar a sala'
+          : 'de conexão Bluetooth',
       );
     }
+
     if (action === 'advertise') {
       await this.requestPermission(
         (resolve) => bluetooth.hasPermissionBtAdvertise(resolve),
@@ -114,17 +192,38 @@ class BluetoothService {
 
   private initialize(): Promise<void> {
     const bluetooth = this.plugin();
+
     return new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('O Bluetooth não respondeu. Verifique as permissões do app.')), 15000);
-      bluetooth.initialize((state) => {
-        if (state.status === 'disabled') {
-          window.clearTimeout(timeout);
-          reject(new Error('Bluetooth desligado. Ative o Bluetooth para continuar.'));
-        } else {
+      const timeout = window.setTimeout(() => {
+        reject(
+          new Error(
+            'O Bluetooth não respondeu. Verifique as permissões do app.',
+          ),
+        );
+      }, 15000);
+
+      bluetooth.initialize(
+        (state) => {
+          if (state.status === 'disabled') {
+            window.clearTimeout(timeout);
+
+            reject(
+              new Error(
+                'Bluetooth desligado. Ative o Bluetooth para continuar.',
+              ),
+            );
+
+            return;
+          }
+
           window.clearTimeout(timeout);
           resolve();
-        }
-      }, { request: true, statusReceiver: true });
+        },
+        {
+          request: true,
+          statusReceiver: true,
+        },
+      );
     });
   }
 
@@ -133,36 +232,76 @@ class BluetoothService {
   }
 
   private receive(address: string, encoded: string): void {
-    const message = this.assembler.push(address, this.plugin().encodedStringToBytes(encoded));
-    if (message !== null) this.onMessage(message, address);
+    const message = this.assembler.push(
+      address,
+      this.plugin().encodedStringToBytes(encoded),
+    );
+
+    if (message !== null) {
+      this.onMessage(message, address);
+    }
   }
 
-  private settleNotification(address: string, reason?: Error): void {
+  private settleNotification(
+    address: string,
+    error?: Error,
+  ): void {
     const queue = this.notificationWaiters.get(address);
     const pending = queue?.shift();
+
     if (!pending) return;
+
     window.clearTimeout(pending.timeout);
-    if (!queue?.length) this.notificationWaiters.delete(address);
-    if (reason) pending.reject(reason);
-    else pending.resolve();
+
+    if (!queue?.length) {
+      this.notificationWaiters.delete(address);
+    }
+
+    if (error) {
+      pending.reject(error);
+    } else {
+      pending.resolve();
+    }
   }
 
-  private notifyPeer(address: string, frame: Uint8Array): Promise<void> {
+  private notifyPeer(
+    address: string,
+    frame: Uint8Array,
+  ): Promise<void> {
     const bluetooth = this.plugin();
+
     return new Promise((resolve, reject) => {
       const pending: PendingNotification = {
         resolve,
         reject,
         timeout: window.setTimeout(() => {
-          this.settleSpecificNotification(address, pending, new Error('O envio Bluetooth expirou. Confira se o convidado continua conectado.'));
+          this.settleSpecificNotification(
+            address,
+            pending,
+            new Error(
+              'O envio Bluetooth expirou. Confira se o convidado continua conectado.',
+            ),
+          );
         }, 10000),
       };
-      const queue = this.notificationWaiters.get(address) ?? [];
+
+      const queue =
+        this.notificationWaiters.get(address) ?? [];
+
       queue.push(pending);
       this.notificationWaiters.set(address, queue);
+
       bluetooth.notify(
         () => undefined,
-        (error) => this.settleSpecificNotification(address, pending, new Error(error.message || 'Falha ao enviar pacote Bluetooth.')),
+        (error) => {
+          this.settleSpecificNotification(
+            address,
+            pending,
+            new Error(
+              error.message || 'Falha ao enviar pacote Bluetooth.',
+            ),
+          );
+        },
         {
           service: GAME_SERVICE_UUID,
           characteristic: GAME_CHARACTERISTIC_UUID,
@@ -173,25 +312,46 @@ class BluetoothService {
     });
   }
 
-  private settleSpecificNotification(address: string, pending: PendingNotification, reason?: Error): void {
+  private settleSpecificNotification(
+    address: string,
+    pending: PendingNotification,
+    error?: Error,
+  ): void {
     const queue = this.notificationWaiters.get(address);
     const index = queue?.indexOf(pending) ?? -1;
+
     if (!queue || index < 0) return;
+
     queue.splice(index, 1);
     window.clearTimeout(pending.timeout);
-    if (!queue.length) this.notificationWaiters.delete(address);
-    if (reason) pending.reject(reason);
-    else pending.resolve();
+
+    if (!queue.length) {
+      this.notificationWaiters.delete(address);
+    }
+
+    if (error) {
+      pending.reject(error);
+    } else {
+      pending.resolve();
+    }
   }
 
   async startHost(
-    room: { gameId: string; code: string; name: string; hostId: string; players: Player[] },
+    room: {
+      gameId: string;
+      code: string;
+      name: string;
+      hostId: string;
+      players: Player[];
+    },
     onMessage: MessageHandler,
     onConnection: ConnectionHandler,
   ): Promise<void> {
     const bluetooth = this.plugin();
+
     await this.ensurePermissions('advertise');
     await this.initialize();
+
     this.role = 'host';
     this.onMessage = onMessage;
     this.onConnection = onConnection;
@@ -199,175 +359,420 @@ class BluetoothService {
     this.connectedAddresses.clear();
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('O servidor Bluetooth não inicializou. Feche e abra o app e tente novamente.')), 10000);
-      bluetooth.initializePeripheral((event: PluginEvent) => {
-        if ((event.status === 'notificationSent' || event.error === 'notificationSent') && event.address) {
-          this.settleNotification(
-            event.address,
-            event.error ? new Error(event.message || 'O Android não conseguiu enviar a notificação BLE.') : undefined,
+      const timeout = window.setTimeout(() => {
+        reject(
+          new Error(
+            'O servidor Bluetooth não inicializou. Feche e abra o app e tente novamente.',
+          ),
+        );
+      }, 10000);
+
+      bluetooth.initializePeripheral(
+        (event: PluginEvent) => {
+          if (
+            (event.status === 'notificationSent' ||
+              event.error === 'notificationSent') &&
+            event.address
+          ) {
+            this.settleNotification(event.address);
+            return;
+          }
+
+          if (event.status === 'disabled') {
+            onConnection(false, '');
+
+            window.clearTimeout(timeout);
+
+            reject(
+              new Error(
+                'Bluetooth desligado. Ative o Bluetooth para criar uma sala.',
+              ),
+            );
+
+            return;
+          }
+
+          if (event.status === 'enabled') {
+            window.clearTimeout(timeout);
+            resolve();
+          }
+
+          if (event.status === 'connected' && event.address) {
+            this.connectedAddresses.add(event.address);
+            onConnection(true, event.address);
+          }
+
+          if (event.status === 'disconnected' && event.address) {
+            this.connectedAddresses.delete(event.address);
+            this.assembler.clearPeer(event.address);
+            onConnection(false, event.address);
+          }
+
+          if (
+            event.status === 'readRequested' &&
+            event.address &&
+            typeof event.requestId === 'number'
+          ) {
+            const value = this.base64(
+              new TextEncoder().encode(JSON.stringify(room)),
+            );
+
+            bluetooth.respond(
+              () => undefined,
+              () => undefined,
+              {
+                requestId: event.requestId,
+                address: event.address,
+                offset: event.offset ?? 0,
+                value,
+              },
+            );
+          }
+
+          if (
+            event.status === 'writeRequested' &&
+            event.address &&
+            event.value &&
+            typeof event.requestId === 'number'
+          ) {
+            bluetooth.respond(
+              () => undefined,
+              () => undefined,
+              {
+                requestId: event.requestId,
+                address: event.address,
+                value: event.value,
+              },
+            );
+
+            this.receive(event.address, event.value);
+          }
+        },
+        () => {
+          window.clearTimeout(timeout);
+
+          reject(
+            new Error(
+              'Não foi possível inicializar o servidor Bluetooth.',
+            ),
           );
-          return;
-        }
-        if (event.status === 'disabled') {
-          onConnection(false, '');
-          window.clearTimeout(timeout);
-          reject(new Error('Bluetooth desligado. Ative o Bluetooth para criar uma sala.'));
-          return;
-        }
-        if (event.status === 'enabled') {
-          window.clearTimeout(timeout);
-          resolve();
-        }
-        if (event.status === 'connected' && event.address) {
-          this.connectedAddresses.add(event.address);
-          onConnection(true, event.address);
-        }
-        if (event.status === 'disconnected' && event.address) {
-          this.connectedAddresses.delete(event.address);
-          this.assembler.clearPeer(event.address);
-          onConnection(false, event.address);
-        }
-        if (event.status === 'readRequested' && event.address && typeof event.requestId === 'number') {
-          const value = this.base64(new TextEncoder().encode(JSON.stringify(room)));
-          bluetooth.respond(() => undefined, () => undefined, {
-            requestId: event.requestId, address: event.address, offset: event.offset ?? 0, value,
-          });
-        }
-        if (event.status === 'writeRequested' && event.address && event.value && typeof event.requestId === 'number') {
-          bluetooth.respond(() => undefined, () => undefined, {
-            requestId: event.requestId, address: event.address, value: event.value,
-          });
-          this.receive(event.address, event.value);
-        }
-      }, (reason) => {
-        window.clearTimeout(timeout);
-        reject(reason);
-      }, { request: true });
+        },
+        {
+          request: true,
+        },
+      );
     });
 
-    await this.call((resolve, reject) => bluetooth.addService(resolve, reject, {
-      service: GAME_SERVICE_UUID,
-      characteristics: [{
-        uuid: GAME_CHARACTERISTIC_UUID,
-        properties: { read: true, write: true, writeWithoutResponse: false, notify: true },
-        permissions: { read: true, write: true },
-        descriptors: [{ uuid: '2901' }],
-      }],
-    }));
-    await this.call((resolve, reject) => bluetooth.startAdvertising(resolve, reject, {
-      service: GAME_SERVICE_UUID,
-      name: `BURRO ${room.code}`,
-      includeDeviceName: false,
-      includeTxPowerLevel: false,
-      connectable: true,
-      mode: 'lowLatency',
-      timeout: 0,
-    } as BluetoothlePlugin.AdvertisingParamsAndroid & { name: string }));
+    await this.call((resolve, reject) =>
+      bluetooth.addService(resolve, reject, {
+        service: GAME_SERVICE_UUID,
+        characteristics: [
+          {
+            uuid: GAME_CHARACTERISTIC_UUID,
+            properties: {
+              read: true,
+              write: true,
+              writeWithoutResponse: false,
+              notify: true,
+            },
+            permissions: {
+              read: true,
+              write: true,
+            },
+            descriptors: [{ uuid: '2901' }],
+          },
+        ],
+      }),
+    );
+
+    // Anuncia o serviço do jogo sem definir um nome personalizado.
+    // Isso evita solicitar ao plugin que anuncie "BURRO + código".
+    await this.call((resolve, reject) =>
+      bluetooth.startAdvertising(resolve, reject, {
+        service: GAME_SERVICE_UUID,
+        includeDeviceName: false,
+        includeTxPowerLevel: false,
+        connectable: true,
+        mode: 'lowLatency',
+        timeout: 0,
+      }),
+    );
   }
 
-  async scan(onRoom: (room: NearbyRoom) => void): Promise<void> {
+  async scan(
+    onRoom: (room: NearbyRoom) => void,
+  ): Promise<void> {
     const bluetooth = this.plugin();
+
     await this.ensurePermissions('scan');
     await this.initialize();
-    bluetooth.startScan((event) => {
-      if (event.status !== 'scanResult' || !event.address) return;
-      const advertisement = typeof event.advertisement === 'string'
-        ? parseAdvertisement(bluetooth.encodedStringToBytes(event.advertisement))
-        : event.advertisement;
-      const services = typeof advertisement === 'object' ? advertisement.serviceUuids ?? [] : [];
-      if (!services.some((service) => service.toLowerCase() === GAME_SERVICE_UUID)) return;
-      onRoom({
-        address: event.address,
-        name: event.name || (typeof advertisement === 'object' ? advertisement.localName : '') || 'Sala BURRO',
-        rssi: event.rssi ?? -100,
-        gameId: '',
-        code: '',
-        playerCount: 0,
-        hostId: '',
-        players: [],
-      });
-    }, () => undefined, { services: [GAME_SERVICE_UUID], scanMode: 2 });
+
+    bluetooth.startScan(
+      (event) => {
+        if (
+          event.status !== 'scanResult' ||
+          !event.address
+        ) {
+          return;
+        }
+
+        const advertisement =
+          typeof event.advertisement === 'string'
+            ? parseAdvertisement(
+                bluetooth.encodedStringToBytes(
+                  event.advertisement,
+                ),
+              )
+            : event.advertisement;
+
+        const services =
+          typeof advertisement === 'object'
+            ? advertisement.serviceUuids ?? []
+            : [];
+
+        if (
+          !services.some(
+            (service) =>
+              service.toLowerCase() === GAME_SERVICE_UUID,
+          )
+        ) {
+          return;
+        }
+
+        // Usa o endereço retornado pelo plugin apenas como
+        // identificador visual temporário durante a busca.
+        const identificador = event.address
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .slice(-5)
+          .toUpperCase();
+
+        onRoom({
+          address: event.address,
+          name: `Sala BURRO · ${identificador || 'próxima'}`,
+          rssi: event.rssi ?? -100,
+          gameId: '',
+          code: '',
+          playerCount: 0,
+          hostId: '',
+          players: [],
+        });
+      },
+      () => undefined,
+      {
+        services: [GAME_SERVICE_UUID],
+        scanMode: 2,
+      },
+    );
   }
 
   async stopScan(): Promise<void> {
     const bluetooth = this.plugin();
-    await this.call((resolve, reject) => bluetooth.stopScan(resolve, reject));
+
+    await this.call((resolve, reject) =>
+      bluetooth.stopScan(resolve, reject),
+    );
   }
 
-  async connectToRoom(room: NearbyRoom, onMessage: MessageHandler, onConnection: ConnectionHandler): Promise<NearbyRoom> {
+  async connectToRoom(
+    room: NearbyRoom,
+    onMessage: MessageHandler,
+    onConnection: ConnectionHandler,
+  ): Promise<NearbyRoom> {
     const bluetooth = this.plugin();
+
     await this.stopScan();
     await this.ensurePermissions('connect');
+
     this.role = 'guest';
     this.remoteAddress = room.address;
     this.onMessage = onMessage;
     this.onConnection = onConnection;
+
     await new Promise<void>((resolve, reject) => {
       let connected = false;
-      bluetooth.connect((event) => {
-        if (event.status === 'connected' && !connected) {
-          connected = true;
-          onConnection(true, room.address);
-          resolve();
-        } else if (event.status === 'disconnected') {
-          this.assembler.clearPeer(room.address);
-          onConnection(false, room.address);
+
+      const timeout = window.setTimeout(() => {
+        if (!connected) {
+          reject(
+            new Error(
+              'A conexão com a sala expirou. Tente novamente.',
+            ),
+          );
         }
-      }, reject, { address: room.address });
-      window.setTimeout(() => {
-        if (!connected) reject(new Error('A conexão com a sala expirou. Tente novamente.'));
       }, 20000);
+
+      bluetooth.connect(
+        (event) => {
+          if (
+            event.status === 'connected' &&
+            !connected
+          ) {
+            connected = true;
+            window.clearTimeout(timeout);
+
+            onConnection(true, room.address);
+            resolve();
+          } else if (
+            event.status === 'disconnected'
+          ) {
+            this.assembler.clearPeer(room.address);
+            onConnection(false, room.address);
+          }
+        },
+        (error) => {
+          window.clearTimeout(timeout);
+          reject(error);
+        },
+        {
+          address: room.address,
+        },
+      );
     });
+
     try {
-      await this.call((resolve, reject) => bluetooth.mtu(resolve, reject, { address: room.address, mtu: 256 }));
+      await this.call((resolve, reject) =>
+        bluetooth.mtu(resolve, reject, {
+          address: room.address,
+          mtu: 256,
+        }),
+      );
     } catch {
-      // Keep the default MTU as a fallback; the host also supports offset reads.
+      // Mantém o MTU padrão como alternativa.
     }
-    await this.call((resolve, reject) => bluetooth.discover(resolve, reject, { address: room.address }));
-    await new Promise<void>((resolve, reject) => bluetooth.subscribe((event) => {
-      if (event.status === 'subscribed') resolve();
-      if (event.status === 'subscribedResult' && event.value) this.receive(room.address, event.value);
-    }, reject, { address: room.address, service: GAME_SERVICE_UUID, characteristic: GAME_CHARACTERISTIC_UUID }));
-    const info = await new Promise<Pick<NearbyRoom, 'gameId' | 'code' | 'name' | 'playerCount' | 'hostId' | 'players'>>((resolve, reject) => {
-      bluetooth.read((event) => {
-        try {
-          resolve(JSON.parse(new TextDecoder().decode(bluetooth.encodedStringToBytes(event.value))));
-        } catch {
-          reject(new Error('A sala enviou dados inválidos.'));
-        }
-      }, reject, { address: room.address, service: GAME_SERVICE_UUID, characteristic: GAME_CHARACTERISTIC_UUID });
-    });
-    return { ...room, ...info };
-  }
 
-  registerPeer(playerId: string, address: string): void {
-    if (this.role === 'host') this.peerAddresses.set(playerId, address);
-  }
+    await this.call((resolve, reject) =>
+      bluetooth.discover(resolve, reject, {
+        address: room.address,
+      }),
+    );
 
-  playerForAddress(address: string): string | undefined {
-    return [...this.peerAddresses.entries()].find(([, peerAddress]) => peerAddress === address)?.[0];
-  }
+    await new Promise<void>((resolve, reject) => {
+      bluetooth.subscribe(
+        (event) => {
+          if (event.status === 'subscribed') {
+            resolve();
+          }
 
-  async send(message: BluetoothMessage, targetPlayerId?: string): Promise<void> {
-    const bluetooth = this.plugin();
-    const transferId = (this.transferId = (this.transferId + 1) & 0xffff);
-    const frames = encodeFrames(message, transferId);
-    if (this.role === 'guest') {
-      for (const frame of frames) {
-        await this.call((resolve, reject) => bluetooth.write(resolve, reject, {
-          address: this.remoteAddress,
+          if (
+            event.status === 'subscribedResult' &&
+            event.value
+          ) {
+            this.receive(room.address, event.value);
+          }
+        },
+        reject,
+        {
+          address: room.address,
           service: GAME_SERVICE_UUID,
           characteristic: GAME_CHARACTERISTIC_UUID,
-          value: this.base64(frame),
-        }));
+        },
+      );
+    });
+
+    const info = await new Promise<
+      Pick<
+        NearbyRoom,
+        | 'gameId'
+        | 'code'
+        | 'name'
+        | 'playerCount'
+        | 'hostId'
+        | 'players'
+      >
+    >((resolve, reject) => {
+      bluetooth.read(
+        (event) => {
+          try {
+            resolve(
+              JSON.parse(
+                new TextDecoder().decode(
+                  bluetooth.encodedStringToBytes(
+                    event.value,
+                  ),
+                ),
+              ),
+            );
+          } catch {
+            reject(
+              new Error('A sala enviou dados inválidos.'),
+            );
+          }
+        },
+        reject,
+        {
+          address: room.address,
+          service: GAME_SERVICE_UUID,
+          characteristic: GAME_CHARACTERISTIC_UUID,
+        },
+      );
+    });
+
+    return {
+      ...room,
+      ...info,
+    };
+  }
+
+  registerPeer(
+    playerId: string,
+    address: string,
+  ): void {
+    if (this.role === 'host') {
+      this.peerAddresses.set(playerId, address);
+    }
+  }
+
+  playerForAddress(
+    address: string,
+  ): string | undefined {
+    return [
+      ...this.peerAddresses.entries(),
+    ].find(
+      ([, peerAddress]) => peerAddress === address,
+    )?.[0];
+  }
+
+  async send(
+    message: BluetoothMessage,
+    targetPlayerId?: string,
+  ): Promise<void> {
+    const bluetooth = this.plugin();
+
+    const transferId = (this.transferId =
+      (this.transferId + 1) & 0xffff);
+
+    const frames = encodeFrames(message, transferId);
+
+    if (this.role === 'guest') {
+      for (const frame of frames) {
+        await this.call((resolve, reject) =>
+          bluetooth.write(resolve, reject, {
+            address: this.remoteAddress,
+            service: GAME_SERVICE_UUID,
+            characteristic: GAME_CHARACTERISTIC_UUID,
+            value: this.base64(frame),
+          }),
+        );
       }
+
       return;
     }
 
     const recipients = targetPlayerId
-      ? [this.peerAddresses.get(targetPlayerId)].filter((address): address is string => Boolean(address))
+      ? [
+          this.peerAddresses.get(targetPlayerId),
+        ].filter(
+          (address): address is string =>
+            Boolean(address),
+        )
       : [...this.connectedAddresses];
-    if (!recipients.length) throw new Error('Ainda não há jogadores conectados à sala.');
+
+    if (!recipients.length) {
+      throw new Error(
+        'Ainda não há jogadores conectados à sala.',
+      );
+    }
+
     for (const address of recipients) {
       for (const frame of frames) {
         await this.notifyPeer(address, frame);
@@ -377,14 +782,31 @@ class BluetoothService {
 
   async stop(): Promise<void> {
     if (!this.role) return;
+
     const bluetooth = this.plugin();
+
     if (this.role === 'host') {
-      await new Promise<void>((resolve) => bluetooth.stopAdvertising(() => resolve(), () => resolve()));
+      await new Promise<void>((resolve) =>
+        bluetooth.stopAdvertising(
+          () => resolve(),
+          () => resolve(),
+        ),
+      );
     } else if (this.remoteAddress) {
-      await new Promise<void>((resolve) => bluetooth.close(() => resolve(), () => resolve(), { address: this.remoteAddress }));
+      await new Promise<void>((resolve) =>
+        bluetooth.close(
+          () => resolve(),
+          () => resolve(),
+          {
+            address: this.remoteAddress,
+          },
+        ),
+      );
     }
+
     this.role = null;
     this.remoteAddress = '';
+
     this.connectedAddresses.clear();
     this.peerAddresses.clear();
   }

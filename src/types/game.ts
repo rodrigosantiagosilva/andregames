@@ -1,5 +1,7 @@
 export type GameStatus = 'lobby' | 'playing' | 'finished' | 'interrupted';
 
+export type TurnPhase = 'draw' | 'discard';
+
 export interface Player {
   id: string;
   name: string;
@@ -32,8 +34,25 @@ export interface Game {
   status: GameStatus;
   hostId: string;
   players: Player[];
+
+  /** Cartas privadas mantidas pelo anfitrião. */
   hands: Record<string, Card[]>;
+
+  /** Monte de compra; as cartas são mantidas pelo anfitrião. */
+  deck: Card[];
+
+  /** Quantidade pública de cartas restantes no monte. */
+  deckCount: number;
+
+  /** Cartas descartadas, visíveis aos participantes. */
+  discardPile: Card[];
+
+  /** Etapa do turno atual. */
+  turnPhase: TurnPhase;
+
+  /** Mantido para compatibilidade com o fluxo antigo. */
   pendingPasses: Record<string, string>;
+
   currentPlayerId: string | null;
   round: number;
   startedAt: number | null;
